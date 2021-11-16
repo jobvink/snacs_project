@@ -1,4 +1,4 @@
-name,descriptoin,nodes,edges
+name,description,nodes,edges
 as-skitter,"An aggregate snapshot of the Internet Protocol (IP) graph, as measured by the traceroute tool on CAIDA's skitter infrastructure, in 2005",1696415,11095298
 dolphins,"An undirected social network of frequent associations observed among 62 dolphins (Tursiops) in a community living off Doubtful Sound, New Zealand, from 1994-2001",62,159
 football,A network of American football games between Division IA colleges during regular season Fall 2000,115,613

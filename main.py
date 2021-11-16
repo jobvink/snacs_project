@@ -33,13 +33,16 @@ def paper(G: nx.Graph, alpha: float) -> float:
 
 
 def greedyOQC(G: nx.Graph, objective: callable, alpha: float):
-    best = G.copy()
-    best_objective = objective(best, alpha)
+    original = G.copy()
+    best = original.nodes
+    best_objective = objective(original, alpha)
+
+    # sort the degree of the graph and put it into a stack
+    sorted_nodes = sorted(G.degree, key=lambda x: x[1])
 
     for _ in tqdm.tqdm(range(len(G.nodes))):
         # find the node with the smallest degree
-        degrees = dict(G.degree)
-        v = min(degrees, key=degrees.get)
+        v = sorted_nodes.pop()[0]
 
         # remove the node with the smallest degree
         G.remove_node(v)
@@ -49,10 +52,12 @@ def greedyOQC(G: nx.Graph, objective: callable, alpha: float):
 
         # save the Graph if the objective function improves
         if current_objective > best_objective:
-            best = G.copy()
+            best = list(G.nodes)
             best_objective = current_objective
 
-    return best
+    B = original.subgraph(best)
+
+    return B
 
 
 def localSearchOQC(G: nx.Graph, t_max: int, objective: callable, alpha: float):
@@ -103,8 +108,78 @@ def localSearchOQC(G: nx.Graph, t_max: int, objective: callable, alpha: float):
     return S
 
 
+
+# Genetic algorithm
+def geneticAlgorithm(G: nx.Graph, objective: callable, alpha: float, population_size: int, t_max: int, mutation_rate: float):
+    # Initialize population
+    population = []
+    for _ in range(population_size):
+        population.append(random.sample(list(G.nodes), len(G.nodes)))
+
+    # Sort population by fitness
+    population = [(objective(G.subgraph(individual), alpha), individual) for individual in population]
+    population.sort(key=lambda x: x[0], reverse=True)
+
+    # Iterate until convergence
+    for _ in range(t_max):
+        # Select parents
+        parents = random.sample(population, 2)
+
+        # Crossover
+        children = [crossover(parents[0][1], parents[1][1]) for x in range(2)]
+
+        # Mutate
+        for child in children:
+            if random.random() <= mutation_rate:
+                child = mutate(child)
+                children.append(child)
+
+        # Evaluate and sort children
+        children = [(objective(G.subgraph(individual), alpha), individual) for individual in children]
+        children.sort(key=lambda x: x[0], reverse=True)
+
+        # Replace worst
+        population[-1] = children[0]
+
+        # sort population by fitness
+        population.sort(key=lambda x: x[0], reverse=True)
+
+        print(objective(G.subgraph(population[0][1]), alpha))
+
+    # return the best child
+    return population[0]
+
+def crossover(parent_1: list, parent_2: list):
+    children = []
+    for i in range(min(len(parent_1), len(parent_2))):
+        if random.random() <= 0.5:
+            children.append(parent_1[i])
+        else:
+            children.append(parent_2[i])
+    return children
+
+
+def mutate(child: list):
+    """
+    :param child: list of nodes
+    :return: a mutated child
+
+    The mutation operator can replace a node, remove a node or add a node.
+    """
+    operator = random.choice([0, 1, 2])
+    if operator == 0:
+        child[random.randint(0, len(child) - 1)] = random.choice(list(G.nodes))
+    elif operator == 1:
+        child.remove(random.choice(list(child)))
+    else:
+        child.append(random.choice(list(G.nodes)))
+
+    return child
+
+
 '''
 Data sources:
+https://snap.stanford.edu/data/email-Eu-core.html
 https://networks.skewed.de/net/football
 https://networks.skewed.de/net/dolphins
 https://networks.skewed.de/net/as_skitter
@@ -119,74 +194,90 @@ if __name__ == '__main__':
 
     n = args.runs
     alpha = 1 / 3
-    t_max = 50
+    t_max = 1000
 
     os.makedirs('./results', exist_ok=True)
     random.seed(42)
 
     # graphs: as_skitter, dolphins, football, web-Google and wiki-topcats
     graphs = [
-        {"name": 'as-skitter', "path": './networks/as-skitter.gml',
-         'description': 'An aggregate snapshot of the Internet Protocol (IP) graph, as measured by the traceroute tool on CAIDA\'s skitter infrastructure, in 2005'},
-        {"name": 'dolphins', "path": './networks/dolphins.gml',
-         'description': 'An undirected social network of frequent associations observed among 62 dolphins (Tursiops) in a community living off Doubtful Sound, New Zealand, from 1994-2001'},
         {"name": 'football', "path": './networks/football.gml',
          'description': 'A network of American football games between Division IA colleges during regular season Fall 2000'},
-        {"name": 'web-Google', "path": './networks/web-Google.gml',
-         'description': 'Webgraph from the Google programming contest, 2002'},
-        {"name": 'wiki-topcats', "path": './networks/wiki-topcats.gml',
-         'description': 'Hyperlink network of the top catagories of Wikipedia in 2011'}
+        {"name": "email-EU-core", "path": "./networks/email-Eu-core.gml",
+         "description": "The network was generated using email data from a large European research institution."},
+        {"name": 'dolphins', "path": './networks/dolphins.gml',
+         'description': 'An undirected social network of frequent associations observed among 62 dolphins (Tursiops) in a community living off Doubtful Sound, New Zealand, from 1994-2001'},
+        # {"name": 'as-skitter', "path": './networks/as-skitter.gml',
+        #  'description': 'An aggregate snapshot of the Internet Protocol (IP) graph, as measured by the traceroute tool on CAIDA\'s skitter infrastructure, in 2005'},
+        # {"name": 'web-Google', "path": './networks/web-Google.gml',
+        #  'description': 'Webgraph from the Google programming contest, 2002'},
+        # {"name": 'wiki-topcats', "path": './networks/wiki-topcats.gml',
+        #  'description': 'Hyperlink network of the top catagories of Wikipedia in 2011'}
     ]
 
-    # collect meta data
-    meta_data = []
-    for graph in tqdm.tqdm(graphs):
-        G = nx.read_gml(graph['path'])
-        meta_data.append({
-            'name': graph['name'],
-            'descriptoin': graph['description'],
-            'nodes': len(G.nodes),
-            'edges': len(G.edges),
-        })
-
-    # save meta data
-    meta_data_df = pd.DataFrame(meta_data)
-    meta_data_df.to_csv('./results/meta_data.csv', index=False)
-
-    data = []
-
-    # collect diameter and edge density for all graphs
+    # evaluate the genetic algorithm on each graph
     for graph in graphs:
-        # run experiment n times
-        # load graph
         G = nx.read_gml(graph['path'])
-        for i in range(n):
-            # find the densest subgraph
-            B = greedyOQC(G, paper, alpha)
-            B_diameter = nx.diameter(B)
-            B_edge_density = edge_density(B, alpha)
+        print(f'{graph["name"]}: {graph["description"]}')
+        for _ in range(n):
+            print(f'Run {_ + 1}')
+            S = geneticAlgorithm(G, paper, alpha, population_size=10, t_max=t_max, mutation_rate=0.1)
 
-            data.append([i, graph['name'], B_diameter, B_edge_density])
-
-    # save data
-    df = pd.DataFrame(data, columns=['run', 'graph', 'diameter', 'edge_density'])
-    df.to_csv('./results/greedyOQC.csv', index=False)
-
-    data = []
+    # collect meta data
+    # meta_data = []
+    # for graph in tqdm.tqdm(graphs):
+    #     G = nx.read_gml(graph['path'])
+    #     meta_data.append({
+    #         'name': graph['name'],
+    #         'description': graph['description'],
+    #         'nodes': len(G.nodes),
+    #         'edges': len(G.edges),
+    #     })
+    #
+    # # save meta data
+    # meta_data_df = pd.DataFrame(meta_data)
+    # meta_data_df.to_csv('./results/meta_data.csv', index=False)
+    #
+    # data = []
+    #
+    # # collect diameter and edge density for all graphs
+    # for graph in graphs:
+    #     # run experiment n times
+    #     # load graph
+    #     G = nx.read_gml(graph['path'])
+    #     for i in range(n):
+    #         # find the densest subgraph
+    #         B = greedyOQC(G, paper, alpha)
+    #
+    #         # if the graph is not connected retrun 0
+    #         if nx.is_connected(B):
+    #             B_diameter = nx.algorithms.approximation.distance_measures.diameter(B)
+    #         else:
+    #             B_diameter = 0
+    #
+    #         B_edge_density = edge_density(B, alpha)
+    #
+    #         data.append([i, graph['name'], B_diameter, B_edge_density])
+    #
+    # # save data
+    # df = pd.DataFrame(data, columns=['run', 'graph', 'diameter', 'edge_density'])
+    # df.to_csv('./results/greedyOQC.csv', index=False)
+    #
+    # data = []
 
     # collect diameter and edge density for all graphs
-    for graph in tqdm.tqdm(graphs):
-        # run experiment n times
-        # load graph
-        G = nx.read_gml(graph['path'])
-        for i in range(n):
-            # find the densest subgraph
-            B = localSearchOQC(G, t_max, paper, alpha)
-            B_diameter = nx.diameter(B)
-            B_edge_density = edge_density(B, alpha)
-
-            data.append([i, graph['name'], B_diameter, B_edge_density])
-
-    # save data
-    df = pd.DataFrame(data, columns=['run', 'graph', 'diameter', 'edge_density'])
-    df.to_csv('./results/localSearchOQC.csv', index=False)
+    # for graph in tqdm.tqdm(graphs):
+    #     # run experiment n times
+    #     # load graph
+    #     G = nx.read_gml(graph['path'])
+    #     for i in range(n):
+    #         # find the densest subgraph
+    #         B = localSearchOQC(G, t_max, paper, alpha)
+    #         B_diameter = nx.diameter(B)
+    #         B_edge_density = edge_density(B, alpha)
+    #
+    #         data.append([i, graph['name'], B_diameter, B_edge_density])
+    #
+    # # save data
+    # df = pd.DataFrame(data, columns=['run', 'graph', 'diameter', 'edge_density'])
+    # df.to_csv('./results/localSearchOQC.csv', index=False)
