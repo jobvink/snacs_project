@@ -139,8 +139,8 @@ def geneticAlgorithm(G: nx.Graph, objective: callable, alpha: float, population_
         # Mutate an individual with mutation rate
         for _, individual in population:
             if random.random() <= mutation_rate:
-                individual = ranndom_mutate(G, individual)
-                children.append(individual)
+                new_individual = ranndom_mutate(G, individual)
+                children.append(new_individual)
 
         # Evaluate and sort children
         children = [(objective(G.subgraph(individual), alpha), individual) for individual in children]
@@ -158,13 +158,13 @@ def geneticAlgorithm(G: nx.Graph, objective: callable, alpha: float, population_
     return G.subgraph(population[0][1])
 
 def crossover(parent_1: list, parent_2: list):
-    children = []
+    child = []
     for i in range(min(len(parent_1), len(parent_2))):
-        if random.random() <= 0.5:
-            children.append(parent_1[i])
+        if random.random() < 0.5:
+            child.append(parent_1[i])
         else:
-            children.append(parent_2[i])
-    return children
+            child.append(parent_2[i])
+    return list(set(child))
 
 
 def ranndom_mutate(G: nx.Graph, child: list):
@@ -175,12 +175,16 @@ def ranndom_mutate(G: nx.Graph, child: list):
 
     The mutation operator can remove a node or add a node.
     """
+    child = child.copy()
     if random.random() <= 0.5:
         # remove a node
-        child.remove(random.choice(child))
+        if len(child) > 1:
+            child.remove(random.choice(child))
     else:
         # add a node
-        child.append(random.choice(list(set(G.nodes) - set(child))))
+        candidates = list(set(G.nodes) - set(child))
+        if len(candidates) > 0:
+            child.append(random.choice(candidates))
 
     return child
 
