@@ -31,6 +31,14 @@ def paper(G: nx.Graph, alpha: float) -> float:
         n_nodes, n_edges = len(G.nodes), len(G.edges)
         return n_edges - alpha * (n_nodes * (n_nodes - 1) / 2)
 
+def ours(G: nx.Graph, alpha: float) -> float:
+    if len(G.nodes) <= 1:
+        return 0
+    else:
+        n_nodes, n_edges = len(G.nodes), len(G.edges)
+        max_edges = (n_nodes * (n_nodes - 1) / 2)
+        return n_edges - alpha * max_edges + nx.is_connected(G) * max_edges
+
 
 def greedyOQC(G: nx.Graph, objective: callable, alpha: float):
     original = G.copy()
@@ -126,13 +134,13 @@ def geneticAlgorithm(G: nx.Graph, objective: callable, alpha: float, population_
         parents = random.sample(population, 2)
 
         # Crossover
-        children = [crossover(parents[0][1], parents[1][1]) for x in range(2)]
+        children = [crossover(parents[0][1], parents[1][1]) for _ in range(2)]
 
-        # Mutate
-        for child in children:
+        # Mutate an individual with mutation rate
+        for _, individual in population:
             if random.random() <= mutation_rate:
-                child = mutate(child)
-                children.append(child)
+                individual = ranndom_mutate(G, individual)
+                children.append(individual)
 
         # Evaluate and sort children
         children = [(objective(G.subgraph(individual), alpha), individual) for individual in children]
@@ -147,7 +155,7 @@ def geneticAlgorithm(G: nx.Graph, objective: callable, alpha: float, population_
         print(objective(G.subgraph(population[0][1]), alpha))
 
     # return the best child
-    return population[0]
+    return G.subgraph(population[0][1])
 
 def crossover(parent_1: list, parent_2: list):
     children = []
@@ -159,20 +167,37 @@ def crossover(parent_1: list, parent_2: list):
     return children
 
 
-def mutate(child: list):
+def ranndom_mutate(G: nx.Graph, child: list):
     """
+    :param G: Graph
     :param child: list of nodes
     :return: a mutated child
 
-    The mutation operator can replace a node, remove a node or add a node.
+    The mutation operator can remove a node or add a node.
     """
-    operator = random.choice([0, 1, 2])
-    if operator == 0:
-        child[random.randint(0, len(child) - 1)] = random.choice(list(G.nodes))
-    elif operator == 1:
-        child.remove(random.choice(list(child)))
+    if random.random() <= 0.5:
+        # remove a node
+        child.remove(random.choice(child))
     else:
-        child.append(random.choice(list(G.nodes)))
+        # add a node
+        child.append(random.choice(list(set(G.nodes) - set(child))))
+
+    return child
+
+def neighborhood_mutate(G: nx.Graph, child: list):
+    """
+    :param G: Graph
+    :param child: list of nodes
+    :return: a mutated child
+
+    The mutation operator can remove a node or add a node from the neighborhood of the child.
+    """
+    if random.random() <= 0.5:
+        # remove a node
+        child.remove(random.choice(child))
+    else:
+        # add a node
+        child.append(random.choice(list(G.neighbors(random.choice(child)))))
 
     return child
 
@@ -216,12 +241,30 @@ if __name__ == '__main__':
     ]
 
     # evaluate the genetic algorithm on each graph
+    data = []
+
+    # collect diameter and edge density for all graphs
     for graph in graphs:
         G = nx.read_gml(graph['path'])
         print(f'{graph["name"]}: {graph["description"]}')
         for _ in range(n):
             print(f'Run {_ + 1}')
-            S = geneticAlgorithm(G, paper, alpha, population_size=10, t_max=t_max, mutation_rate=0.1)
+            B = geneticAlgorithm(G, paper, alpha, population_size=10, t_max=t_max, mutation_rate=0.1)
+
+            # if the graph is not connected retrun 0
+            if nx.is_connected(B):
+                B_diameter = nx.algorithms.approximation.distance_measures.diameter(B)
+            else:
+                B_diameter = 0
+
+            B_edge_density = edge_density(B, alpha)
+
+            data.append({'graph': graph['name'], 'diameter': B_diameter, 'edge_density': B_edge_density})
+
+    # save results with pandas
+    df = pd.DataFrame(data)
+    df.to_csv('./results/genetic_algorithm.csv', index=False)
+
 
     # collect meta data
     # meta_data = []
