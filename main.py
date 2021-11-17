@@ -7,7 +7,9 @@ import networkx as nx
 import numpy as np
 import pandas as pd
 import tqdm
+import snap
 from matplotlib import pyplot as plt
+
 
 def densest_subgraph(G: nx.Graph, alpha: float) -> float:
     if len(G.nodes) <= 1:
@@ -23,6 +25,13 @@ def edge_density(G: nx.Graph, alpha: float) -> float:
         n_nodes, n_edges = len(G.nodes), len(G.edges)
         return np.log(n_edges) - alpha * np.log(n_nodes * (n_nodes - 1) / 2)
 
+def edge_density_for_snap(G: snap.PUNGraph, alpha: float) -> float:
+    if G.GetNodes() <= 1:
+        return 0
+    else:
+        n_nodes, n_edges = G.GetNodes(), G.GetEdges()
+        return np.log(n_edges) - alpha * np.log(n_nodes * (n_nodes - 1) / 2)
+
 
 def paper(G: nx.Graph, alpha: float) -> float:
     if len(G.nodes) <= 1:
@@ -30,6 +39,14 @@ def paper(G: nx.Graph, alpha: float) -> float:
     else:
         n_nodes, n_edges = len(G.nodes), len(G.edges)
         return n_edges - alpha * (n_nodes * (n_nodes - 1) / 2)
+
+def paper_for_snap(G: snap.PUNGraph, alpha: float) -> float:
+    if G.GetNodes() <= 1:
+        return 0
+    else:
+        n_nodes, n_edges = G.GetNodes(), G.GetEdges()
+        return n_edges - alpha * (n_nodes * (n_nodes - 1) / 2)
+
 
 def ours(G: nx.Graph, alpha: float) -> float:
     if len(G.nodes) <= 1:
@@ -46,11 +63,13 @@ def greedyOQC(G: nx.Graph, objective: callable, alpha: float):
     best_objective = objective(original, alpha)
 
     # sort the degree of the graph and put it into a stack
-    sorted_nodes = sorted(G.degree, key=lambda x: x[1])
+    degrees = list(G.degree)
+    random.shuffle(degrees)
+    sorted_nodes = sorted(degrees, key=lambda x: x[1])
 
     for _ in tqdm.tqdm(range(len(G.nodes))):
         # find the node with the smallest degree
-        v = sorted_nodes.pop()[0]
+        v = sorted_nodes.pop(0)[0]
 
         # remove the node with the smallest degree
         G.remove_node(v)
@@ -67,58 +86,91 @@ def greedyOQC(G: nx.Graph, objective: callable, alpha: float):
 
     return B
 
+def neighborhood(G: nx.Graph, nodes: list):
+    neighbors = []
+    for node in nodes:
+        neighbors += list(G.neighbors(node))
+    return set(neighbors)
 
-def localSearchOQC(G: nx.Graph, t_max: int, objective: callable, alpha: float):
+
+def localSearchOQC(G: nx.Graph, objective: callable, alpha: float, t_max: int):
     v = random.choice(list(G.nodes))
-    S: nx.Graph = G.subgraph([v])
-    b_1 = True
-    t = 1
-    while b_1 and t <= t_max:
+    S = [v]
+    for _ in tqdm.tqdm(range(t_max)):
         b_2 = True
-        remainingGraph = nx.subgraph_view(G, lambda n: n not in S.nodes)
         while b_2:
-            best_objective = objective(S, alpha)
-            found = False
+            best_objective = objective(G.subgraph(S), alpha)
+            b_2 = False
 
-            nodes_in_S = list(S.nodes)
-            for node in remainingGraph.nodes:
-                candidate = nx.subgraph_view(G, lambda n: n in nodes_in_S + [node])
+            remainingNodes = neighborhood(G, S) - set(S)
+            for node in remainingNodes:
+                candidate = G.subgraph(S + [node])
                 current_objective = objective(candidate, alpha)
                 if current_objective >= best_objective:
-                    S = G.subgraph(list(S.nodes) + [node])
-                    found = True
+                    S += [node]
+                    b_2 = True
                     break
 
-            if not found:
-                b_2 = False
+        best_objective = objective(G.subgraph(S), alpha)
 
-        best_objective = objective(S, alpha)
-        found = False
-
-        for node in S.nodes:
-            nodes_in_S = list(S.nodes)
-            nodes_in_S.remove(node)
-            candidate = nx.subgraph_view(G, lambda n: n in nodes_in_S)
+        b_1 = False
+        for node in S:
+            candidate = G.subgraph(list(set(S) - set(node)))
             current_objective = objective(candidate, alpha)
             if current_objective >= best_objective:
-                new_view = list(S.nodes)
-                new_view.remove(node)
-                S = G.subgraph(new_view)
-                found = True
+                S.remove(node)
+                b_1 = True
                 break
 
-        if not found:
-            b_1 = False
+        if not b_1:
+            break
 
-        t += 1
+    return G.subgraph(S)
 
-    # Todo: hier moet nog iets bij volgens mij
-    return S
+def localSearchOQCSnap(G: snap.PUNGraph, objective: callable, alpha: float, t_max: int):
+    S = [G.GetRndNId()]
+    best_objective = objective(G.GetSubGraph(S), alpha)
+    b_1 = True
+    t = 1
 
+    for _ in tqdm.tqdm(range(t_max)):
+        b_2 = True
+        while b_2:
+            b_2 = False
+            # search the remaining nodes to improve the objective function
+            for node in G.Nodes():
+                if node.GetId() in S:
+                    continue
+                candidate = G.GetSubGraph(S + [node.GetId()])
+                current_objective = objective(candidate, alpha)
+                if current_objective >= best_objective:
+                    S += [node.GetId()]
+                    best_objective = current_objective
+                    b_2 = True
+                    break
+
+        # search a node that can be removed to improve the objective function
+        b_1 = False
+        for node in S:
+            candidate_nodes = S.copy()
+            candidate_nodes.remove(node)
+            candidate = G.GetSubGraph(candidate_nodes)
+            current_objective = objective(candidate, alpha)
+            if current_objective >= best_objective:
+                S.remove(node)
+                best_objective = current_objective
+                b_1 = True
+                break
+
+        if not b_1:
+            break
+
+    return G.GetSubGraph(S)
 
 
 # Genetic algorithm
-def geneticAlgorithm(G: nx.Graph, objective: callable, alpha: float, population_size: int, t_max: int, mutation_rate: float):
+def geneticAlgorithm(G: nx.Graph, objective: callable, alpha: float, population_size: int, t_max: int,
+                     mutation_rate: float):
     # Initialize population
     population = []
     for _ in range(population_size):
@@ -152,10 +204,9 @@ def geneticAlgorithm(G: nx.Graph, objective: callable, alpha: float, population_
         # sort population by fitness
         population.sort(key=lambda x: x[0], reverse=True)
 
-        print(objective(G.subgraph(population[0][1]), alpha))
-
     # return the best child
     return G.subgraph(population[0][1])
+
 
 def crossover(parent_1: list, parent_2: list):
     child = []
@@ -188,6 +239,7 @@ def ranndom_mutate(G: nx.Graph, child: list):
 
     return child
 
+
 def neighborhood_mutate(G: nx.Graph, child: list):
     """
     :param G: Graph
@@ -206,14 +258,87 @@ def neighborhood_mutate(G: nx.Graph, child: list):
     return child
 
 
+def benchmark_function(graphs, function, objective, n, alpha, name, config):
+    """
+    This function benchmarks a function n times
+    and saves the diameter and edge_density of the resulting graph with pandas and a given name
+    :return:
+    """
+    data = []
+
+    for graph in graphs:
+        # read graph from edge list
+        G = nx.read_edgelist(graph['path'])
+
+        print(f'Benchmarking {graph["name"]}')
+
+        for run in tqdm.tqdm(range(n)):
+            S = function(G.copy(), objective, alpha, **config)
+
+            # if the graph is not connected
+            if nx.is_connected(S):
+                S_diameter = nx.algorithms.approximation.distance_measures.diameter(S)
+            else:
+                S_diameter = np.nan
+
+            S_edge_density = edge_density(S, alpha)
+            S_nodes = len(S.nodes)
+            S_edges = len(S.edges)
+
+            data.append({
+                'graph': graph['name'],
+                'run': run,
+                'diameter': S_diameter,
+                'edge_density': S_edge_density,
+                'nodes': S_nodes,
+                'edges': S_edges
+            })
+
+    # save results with pandas
+    df = pd.DataFrame(data)
+    df.to_csv('./results/' + name + '.csv')
+
+
+def benchmark_function_with_snap(graphs, function, objective, n, alpha, name, config):
+    """
+    This function benchmarks a function n times
+    and saves the diameter and edge_density of the resulting graph with pandas and a given name
+    :return:
+    """
+    data = []
+
+    for graph in graphs:
+        G = snap.LoadEdgeListStr(snap.PUNGraph, graph['path'])
+
+        print(f'Benchmarking {graph["name"]}')
+
+        for run in tqdm.tqdm(range(n)):
+            S = function(G, objective, alpha, **config)
+
+            # if the graph is not connected
+            S_diameter = S.GetBfsFullDiam(100, False)
+            S_edge_density = edge_density_for_snap(S, alpha)
+            S_nodes = S.GetNodes()
+            S_edges = S.GetEdges()
+
+            data.append({
+                'graph': graph['name'],
+                'run': run,
+                'diameter': S_diameter,
+                'edge_density': S_edge_density,
+                'nodes': S_nodes,
+                'edges': S_edges
+            })
+
+    # save results with pandas
+    df = pd.DataFrame(data)
+    df.to_csv('./results/' + name + '.csv')
+
 '''
 Data sources:
 https://snap.stanford.edu/data/email-Eu-core.html
 https://networks.skewed.de/net/football
 https://networks.skewed.de/net/dolphins
-https://networks.skewed.de/net/as_skitter
-http://snap.stanford.edu/data/wiki-topcats.html
-http://snap.stanford.edu/data/web-Google.html
 '''
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -223,108 +348,53 @@ if __name__ == '__main__':
 
     n = args.runs
     alpha = 1 / 3
-    t_max = 1000
 
     os.makedirs('./results', exist_ok=True)
     random.seed(42)
 
-    # graphs: as_skitter, dolphins, football, web-Google and wiki-topcats
+    # load graphs: dolp, football, dolphins, C-elegans-frontal, amazon0302
     graphs = [
-        {"name": 'football', "path": './networks/football.gml',
-         'description': 'A network of American football games between Division IA colleges during regular season Fall 2000'},
-        {"name": "email-EU-core", "path": "./networks/email-Eu-core.gml",
-         "description": "The network was generated using email data from a large European research institution."},
-        {"name": 'dolphins', "path": './networks/dolphins.gml',
+        {"name": 'dolphins', "path": './networks/dolphins.edgelist',
          'description': 'An undirected social network of frequent associations observed among 62 dolphins (Tursiops) in a community living off Doubtful Sound, New Zealand, from 1994-2001'},
-        # {"name": 'as-skitter', "path": './networks/as-skitter.gml',
-        #  'description': 'An aggregate snapshot of the Internet Protocol (IP) graph, as measured by the traceroute tool on CAIDA\'s skitter infrastructure, in 2005'},
-        # {"name": 'web-Google', "path": './networks/web-Google.gml',
-        #  'description': 'Webgraph from the Google programming contest, 2002'},
-        # {"name": 'wiki-topcats', "path": './networks/wiki-topcats.gml',
-        #  'description': 'Hyperlink network of the top catagories of Wikipedia in 2011'}
+        {"name": 'football', "path": './networks/football.edgelist',
+         'description': 'A network of American football games between Division IA colleges during regular season Fall 2000'},
+        {"name": "email-EU-core", "path": "./networks/email-Eu-core.edgelist",
+         "description": "The network was generated using email data from a large European research institution."},
+        {"name": "C-elegans-frontal", "path": "./networks/C-elegans-frontal.edgelist",
+         "description": "..."},
+        {"name": "amazon0302", "path": "./networks/amazon0302.edgelist",
+         "description": "Network was collected by crawling Amazon website."}
     ]
 
-    # evaluate the genetic algorithm on each graph
-    data = []
-
-    # collect diameter and edge density for all graphs
-    for graph in graphs:
-        G = nx.read_gml(graph['path'])
-        print(f'{graph["name"]}: {graph["description"]}')
-        for _ in range(n):
-            print(f'Run {_ + 1}')
-            B = geneticAlgorithm(G, paper, alpha, population_size=10, t_max=t_max, mutation_rate=0.1)
-
-            # if the graph is not connected retrun 0
-            if nx.is_connected(B):
-                B_diameter = nx.algorithms.approximation.distance_measures.diameter(B)
-            else:
-                B_diameter = 0
-
-            B_edge_density = edge_density(B, alpha)
-
-            data.append({'graph': graph['name'], 'diameter': B_diameter, 'edge_density': B_edge_density})
-
-    # save results with pandas
-    df = pd.DataFrame(data)
-    df.to_csv('./results/genetic_algorithm.csv', index=False)
-
-
     # collect meta data
-    # meta_data = []
-    # for graph in tqdm.tqdm(graphs):
-    #     G = nx.read_gml(graph['path'])
-    #     meta_data.append({
-    #         'name': graph['name'],
-    #         'description': graph['description'],
-    #         'nodes': len(G.nodes),
-    #         'edges': len(G.edges),
-    #     })
-    #
-    # # save meta data
-    # meta_data_df = pd.DataFrame(meta_data)
-    # meta_data_df.to_csv('./results/meta_data.csv', index=False)
-    #
-    # data = []
-    #
-    # # collect diameter and edge density for all graphs
-    # for graph in graphs:
-    #     # run experiment n times
-    #     # load graph
-    #     G = nx.read_gml(graph['path'])
-    #     for i in range(n):
-    #         # find the densest subgraph
-    #         B = greedyOQC(G, paper, alpha)
-    #
-    #         # if the graph is not connected retrun 0
-    #         if nx.is_connected(B):
-    #             B_diameter = nx.algorithms.approximation.distance_measures.diameter(B)
-    #         else:
-    #             B_diameter = 0
-    #
-    #         B_edge_density = edge_density(B, alpha)
-    #
-    #         data.append([i, graph['name'], B_diameter, B_edge_density])
-    #
-    # # save data
-    # df = pd.DataFrame(data, columns=['run', 'graph', 'diameter', 'edge_density'])
-    # df.to_csv('./results/greedyOQC.csv', index=False)
-    #
-    # data = []
+    print('Collecting meta data...')
+    meta_data = []
+    for graph in tqdm.tqdm(graphs):
+        G = nx.read_edgelist(graph['path'])
+        meta_data.append({
+            'name': graph['name'],
+            'description': graph['description'],
+            'nodes': len(G.nodes),
+            'edges': len(G.edges),
+        })
 
-    # collect diameter and edge density for all graphs
-    # for graph in tqdm.tqdm(graphs):
-    #     # run experiment n times
-    #     # load graph
-    #     G = nx.read_gml(graph['path'])
-    #     for i in range(n):
-    #         # find the densest subgraph
-    #         B = localSearchOQC(G, t_max, paper, alpha)
-    #         B_diameter = nx.diameter(B)
-    #         B_edge_density = edge_density(B, alpha)
-    #
-    #         data.append([i, graph['name'], B_diameter, B_edge_density])
-    #
-    # # save data
-    # df = pd.DataFrame(data, columns=['run', 'graph', 'diameter', 'edge_density'])
-    # df.to_csv('./results/localSearchOQC.csv', index=False)
+    # save meta data
+    meta_data_df = pd.DataFrame(meta_data)
+    meta_data_df.to_csv('./results/meta_data.csv', index=False)
+
+    # benchmark the genetic algorithm
+    print('Benchmarking geneticAlgorithm...')
+    benchmark_function(graphs, geneticAlgorithm, paper, n, alpha, 'geneticAlgorithm',
+                       {'population_size': 10, 't_max': 1000, 'mutation_rate': 0.1})
+
+    # benchmark the greedyOQC algorithm
+    print('Benchmarking greedyOQC...')
+    benchmark_function(graphs, greedyOQC, paper, n, alpha, 'greedyOQC', {})
+
+    # benchmark the localSearchOQCSnap algorithm
+    print('Benchmarking localSearchOQCSnap...')
+    benchmark_function_with_snap(graphs, localSearchOQCSnap, paper_for_snap, n, alpha, 'localSearchOQCSnap', {'t_max': 50})
+
+
+
+

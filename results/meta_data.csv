@@ -1,6 +1,6 @@
 name,description,nodes,edges
-as-skitter,"An aggregate snapshot of the Internet Protocol (IP) graph, as measured by the traceroute tool on CAIDA's skitter infrastructure, in 2005",1696415,11095298
 dolphins,"An undirected social network of frequent associations observed among 62 dolphins (Tursiops) in a community living off Doubtful Sound, New Zealand, from 1994-2001",62,159
 football,A network of American football games between Division IA colleges during regular season Fall 2000,115,613
-web-Google,"Webgraph from the Google programming contest, 2002",875713,4322051
-wiki-topcats,Hyperlink network of the top catagories of Wikipedia in 2011,1791489,25447873
+email-EU-core,The network was generated using email data from a large European research institution.,1005,16706
+C-elegans-frontal,...,131,687
+amazon0302,Network was collected by crawling Amazon website.,262111,899792
