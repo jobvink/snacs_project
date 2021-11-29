@@ -108,6 +108,7 @@ def neighborhood_mutate(G: nx.Graph, child: list):
 
     The mutation operator can remove a node or add a node from the neighborhood of the child.
     """
+    child = child.copy()
     if random.random() <= 0.5:
         # remove a node
         child.remove(random.choice(child))
@@ -177,8 +178,8 @@ if __name__ == '__main__':
          "description": "The network was generated using email data from a large European research institution."},
         {"name": "C-elegans-frontal", "path": "./networks/C-elegans-frontal.edgelist",
          "description": "..."},
-        {"name": "amazon0302", "path": "./networks/amazon0302.edgelist",
-         "description": "Network was collected by crawling Amazon website."}
+        # {"name": "amazon0302", "path": "./networks/amazon0302.edgelist",
+        #  "description": "Network was collected by crawling Amazon website."}
     ]
     
     alpha = 1/3
@@ -201,7 +202,7 @@ if __name__ == '__main__':
         'mutation_rate': 0.1,
     }
 
-    for mutation_function in [ranndom_mutate, neighborhood_mutate]:
+    for mutation_function in [neighborhood_mutate, ranndom_mutate]:
         config['mutation_function'] = mutation_function
         benchmark_function(graphs, geneticAlgorithm, paper, n, alpha, f'ga_{mutation_function.__name__}', config)
 
