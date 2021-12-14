@@ -1,0 +1,1 @@
+Experiments can be run with `sh run.sh` or by running `python3 main.py`

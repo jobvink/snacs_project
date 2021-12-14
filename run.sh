@@ -2,5 +2,5 @@
 
 for i in {1..10}
 do
-  python3 ga_experiment.py --run "$i" &
+  python3 main.py --run "$i" &
 done
